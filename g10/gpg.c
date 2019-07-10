@@ -149,6 +149,7 @@ enum cmd_and_opt_values
     aSendKeys,
     aRecvKeys,
     aLocateKeys,
+    aLocateExtKeys,
     aSearchKeys,
     aRefreshKeys,
     aFetchKeys,
@@ -503,6 +504,7 @@ static ARGPARSE_OPTS opts[] = {
   ARGPARSE_c (aRefreshKeys, "refresh-keys",
               N_("update all keys from a keyserver")),
   ARGPARSE_c (aLocateKeys, "locate-keys", "@"),
+  ARGPARSE_c (aLocateExtKeys, "locate-external-keys", "@"),
   ARGPARSE_c (aFetchKeys, "fetch-keys" , "@" ),
   ARGPARSE_c (aShowKeys, "show-keys" , "@" ),
   ARGPARSE_c (aExportSecret, "export-secret-keys" , "@" ),
@@ -2422,7 +2424,9 @@ main (int argc, char **argv)
     opt.import_options = IMPORT_REPAIR_KEYS;
     opt.export_options = EXPORT_ATTRIBUTES;
     opt.keyserver_options.import_options = (IMPORT_REPAIR_KEYS
-					    | IMPORT_REPAIR_PKS_SUBKEY_BUG);
+					    | IMPORT_REPAIR_PKS_SUBKEY_BUG
+                                            | IMPORT_SELF_SIGS_ONLY
+                                            | IMPORT_CLEAN);
     opt.keyserver_options.export_options = EXPORT_ATTRIBUTES;
     opt.keyserver_options.options = KEYSERVER_HONOR_PKA_RECORD;
     opt.verify_options = (LIST_SHOW_UID_VALIDITY
@@ -2612,6 +2616,7 @@ main (int argc, char **argv)
 #endif /* ENABLE_CARD_SUPPORT*/
 	  case aListKeys:
 	  case aLocateKeys:
+	  case aLocateExtKeys:
 	  case aListSigs:
 	  case aExportSecret:
 	  case aExportSecretSub:
@@ -4512,7 +4517,7 @@ main (int argc, char **argv)
 	sl = NULL;
 	for( ; argc; argc--, argv++ )
 	    add_to_strlist2( &sl, *argv, utf8_strings );
-	public_key_list (ctrl, sl, 0);
+	public_key_list (ctrl, sl, 0, 0);
 	free_strlist(sl);
 	break;
       case aListSecretKeys:
@@ -4523,10 +4528,11 @@ main (int argc, char **argv)
 	free_strlist(sl);
 	break;
       case aLocateKeys:
+      case aLocateExtKeys:
 	sl = NULL;
 	for (; argc; argc--, argv++)
           add_to_strlist2( &sl, *argv, utf8_strings );
-	public_key_list (ctrl, sl, 1);
+	public_key_list (ctrl, sl, 1, cmd == aLocateExtKeys);
 	free_strlist (sl);
 	break;
 

@@ -843,11 +843,21 @@ key_byname (ctrl_t ctrl, GETKEY_CTX *retctx, strlist_t namelist,
 
 /* Find a public key identified by NAME.
  *
- * If name appears to be a valid RFC822 mailbox (i.e., email
- * address) and auto key lookup is enabled (no_akl == 0), then the
- * specified auto key lookup methods (--auto-key-lookup) are used to
- * import the key into the local keyring.  Otherwise, just the local
- * keyring is consulted.
+ * If name appears to be a valid RFC822 mailbox (i.e., email address)
+ * and auto key lookup is enabled (mode != GET_PUBKEY_NO_AKL), then
+ * the specified auto key lookup methods (--auto-key-lookup) are used
+ * to import the key into the local keyring.  Otherwise, just the
+ * local keyring is consulted.
+ *
+ * MODE can be one of:
+ *    GET_PUBKEY_NORMAL   - The standard mode
+ *    GET_PUBKEY_NO_AKL   - The auto key locate functionality is
+ *                          disabled and only the local key ring is
+ *                          considered.  Note: the local key ring is
+ *                          consulted even if local is not in the
+ *                          auto-key-locate option list!
+ *    GET_PUBKEY_NO_LOCAL - Only the auto key locate functionaly is
+ *                          used and no local search is done.
  *
  * If RETCTX is not NULL, then the constructed context is returned in
  * *RETCTX so that getpubkey_next can be used to get subsequent
@@ -883,18 +893,14 @@ key_byname (ctrl_t ctrl, GETKEY_CTX *retctx, strlist_t namelist,
  * documentation for skip_unusable for an exact definition) are
  * skipped unless they are looked up by key id or by fingerprint.
  *
- * If NO_AKL is set, then the auto key locate functionality is
- * disabled and only the local key ring is considered.  Note: the
- * local key ring is consulted even if local is not in the
- * --auto-key-locate option list!
- *
  * This function returns 0 on success.  Otherwise, an error code is
  * returned.  In particular, GPG_ERR_NO_PUBKEY or GPG_ERR_NO_SECKEY
  * (if want_secret is set) is returned if the key is not found.  */
 int
-get_pubkey_byname (ctrl_t ctrl, GETKEY_CTX * retctx, PKT_public_key * pk,
+get_pubkey_byname (ctrl_t ctrl, enum get_pubkey_modes mode,
+                   GETKEY_CTX * retctx, PKT_public_key * pk,
 		   const char *name, KBNODE * ret_keyblock,
-		   KEYDB_HANDLE * ret_kdbhd, int include_unusable, int no_akl)
+		   KEYDB_HANDLE * ret_kdbhd, int include_unusable)
 {
   int rc;
   strlist_t namelist = NULL;
@@ -930,7 +936,9 @@ get_pubkey_byname (ctrl_t ctrl, GETKEY_CTX * retctx, PKT_public_key * pk,
    * Note: we only save the search context in RETCTX if the local
    * method is the first method tried (either explicitly or
    * implicitly).  */
-  if (!no_akl)
+  if (mode == GET_PUBKEY_NO_LOCAL)
+    nodefault = 1;  /* Auto-key-locate but ignore "local".  */
+  else if (mode != GET_PUBKEY_NO_AKL)
     {
       /* auto-key-locate is enabled.  */
 
@@ -959,7 +967,13 @@ get_pubkey_byname (ctrl_t ctrl, GETKEY_CTX * retctx, PKT_public_key * pk,
       anylocalfirst = 1;
     }
 
-  if (nodefault && is_mbox)
+  if (mode == GET_PUBKEY_NO_LOCAL)
+    {
+      /* Force using the AKL.  If IS_MBOX is not set this is the final
+       * error code.  */
+      rc = GPG_ERR_NO_PUBKEY;
+    }
+  else if (nodefault && is_mbox)
     {
       /* Either "nodefault" or "local" (explicitly) appeared in the
        * auto key locate list and NAME appears to be an email address.
@@ -980,7 +994,9 @@ get_pubkey_byname (ctrl_t ctrl, GETKEY_CTX * retctx, PKT_public_key * pk,
 
   /* If the requested name resembles a valid mailbox and automatic
      retrieval has been enabled, we try to import the key. */
-  if (gpg_err_code (rc) == GPG_ERR_NO_PUBKEY && !no_akl && is_mbox)
+  if (gpg_err_code (rc) == GPG_ERR_NO_PUBKEY
+      && mode != GET_PUBKEY_NO_AKL
+      && is_mbox)
     {
       /* NAME wasn't present in the local keyring (or we didn't try
        * the local keyring).  Since the auto key locate feature is
@@ -999,22 +1015,30 @@ get_pubkey_byname (ctrl_t ctrl, GETKEY_CTX * retctx, PKT_public_key * pk,
 	    {
 	    case AKL_NODEFAULT:
 	      /* This is a dummy mechanism.  */
-	      mechanism_string = "None";
+	      mechanism_string = "";
 	      rc = GPG_ERR_NO_PUBKEY;
 	      break;
 
 	    case AKL_LOCAL:
-	      mechanism_string = "Local";
-	      did_akl_local = 1;
-	      if (retctx)
-		{
-		  getkey_end (ctrl, *retctx);
-		  *retctx = NULL;
-		}
-	      add_to_strlist (&namelist, name);
-	      rc = key_byname (ctrl, anylocalfirst ? retctx : NULL,
-			       namelist, pk, 0,
-			       include_unusable, ret_keyblock, ret_kdbhd);
+              if (mode == GET_PUBKEY_NO_LOCAL)
+                {
+                  mechanism_string = "";
+                  rc = GPG_ERR_NO_PUBKEY;
+                }
+              else
+                {
+                  mechanism_string = "Local";
+                  did_akl_local = 1;
+                  if (retctx)
+                    {
+                      getkey_end (ctrl, *retctx);
+                      *retctx = NULL;
+                    }
+                  add_to_strlist (&namelist, name);
+                  rc = key_byname (ctrl, anylocalfirst ? retctx : NULL,
+                                   namelist, pk, 0,
+                                   include_unusable, ret_keyblock, ret_kdbhd);
+                }
 	      break;
 
 	    case AKL_CERT:
@@ -1141,14 +1165,13 @@ get_pubkey_byname (ctrl_t ctrl, GETKEY_CTX * retctx, PKT_public_key * pk,
                           name, mechanism_string);
 	      break;
 	    }
-	  if (gpg_err_code (rc) != GPG_ERR_NO_PUBKEY
-              || opt.verbose || no_fingerprint)
+	  if ((gpg_err_code (rc) != GPG_ERR_NO_PUBKEY
+               || opt.verbose || no_fingerprint) && *mechanism_string)
 	    log_info (_("error retrieving '%s' via %s: %s\n"),
 		      name, mechanism_string,
 		      no_fingerprint ? _("No fingerprint") : gpg_strerror (rc));
 	}
     }
-
 
   if (rc && retctx)
     {
@@ -1302,7 +1325,8 @@ pubkey_cmp (ctrl_t ctrl, const char *name, struct pubkey_cmp_cookie *old,
  * resembles a mail address, the results are ranked and only the best
  * result is returned.  */
 gpg_error_t
-get_best_pubkey_byname (ctrl_t ctrl, GETKEY_CTX *retctx, PKT_public_key *pk,
+get_best_pubkey_byname (ctrl_t ctrl, enum get_pubkey_modes mode,
+                        GETKEY_CTX *retctx, PKT_public_key *pk,
                         const char *name, KBNODE *ret_keyblock,
                         int include_unusable)
 {
@@ -1325,8 +1349,9 @@ get_best_pubkey_byname (ctrl_t ctrl, GETKEY_CTX *retctx, PKT_public_key *pk,
       getkey_end (ctrl, ctx);
       ctx = NULL;
     }
-  err = get_pubkey_byname (ctrl, &ctx, pk, name, ret_keyblock,
-                           NULL, include_unusable, 0);
+  err = get_pubkey_byname (ctrl, mode,
+                           &ctx, pk, name, ret_keyblock,
+                           NULL, include_unusable);
   if (err)
     {
       getkey_end (ctrl, ctx);

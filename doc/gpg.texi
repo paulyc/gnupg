@@ -346,12 +346,17 @@ numbers 1-9 or "T" for 10 and above to indicate trust signature levels
 
 
 @item --locate-keys
+@itemx --locate-external-keys
 @opindex locate-keys
+@opindex locate-external-keys
 Locate the keys given as arguments.  This command basically uses the
-same algorithm as used when locating keys for encryption or signing and
-may thus be used to see what keys @command{@gpgname} might use.  In
-particular external methods as defined by @option{--auto-key-locate} may
-be used to locate a key.  Only public keys are listed.
+same algorithm as used when locating keys for encryption or signing
+and may thus be used to see what keys @command{@gpgname} might use.
+In particular external methods as defined by
+@option{--auto-key-locate} may be used to locate a key.  Only public
+keys are listed.  The variant @option{--locate-external-keys} does not
+consider a locally existing key and can thus be used to force the
+refresh of a key via the defined external methods.
 
 @item --show-keys
 @opindex show-keys
@@ -1809,10 +1814,26 @@ These options enable or disable the automatic retrieving of keys from
 a keyserver when verifying signatures made by keys that are not on the
 local keyring.  The default is @option{--no-auto-key-retrieve}.
 
-If the method "wkd" is included in the list of methods given to
-@option{auto-key-locate}, the signer's user ID is part of the
-signature, and the option @option{--disable-signer-uid} is not used,
-the "wkd" method may also be used to retrieve a key.
+The order of methods tried to lookup the key is:
+
+1. If a preferred keyserver is specified in the signature and the
+option @option{honor-keyserver-url} is active (which is not the
+default), that keyserver is tried.  Note that the creator of the
+signature uses the option @option{--sig-keyserver-url} to specify the
+preferred keyserver for data signatures.
+
+2. If the signature has the Signer's UID set (e.g. using
+@option{--sender} while creating the signature) a Web Key Directory
+(WKD) lookup is done.  This is the default configuration but can be
+disabled by removing WKD from the auto-key-locate list or by using the
+option @option{--disable-signer-uid}.
+
+3. If the option @option{honor-pka-record} is active, the legacy PKA
+method is used.
+
+4. If any keyserver is configured and the Issuer Fingerprint is part
+of the signature (since GnuPG 2.1.16), the configured keyservers are
+tried.
 
 Note that this option makes a "web bug" like behavior possible.
 Keyserver or Web Key Directory operators can see which keys you
@@ -1911,6 +1932,11 @@ are available for all keyserver types, some common options are:
   @code{dirmngr} configuration options instead.
 
 @end table
+
+The default list of options is: "self-sigs-only, import-clean,
+repair-keys, repair-pks-subkey-bug, export-attributes,
+honor-pka-record".
+
 
 @item --completes-needed @var{n}
 @opindex compliant-needed
@@ -2341,6 +2367,14 @@ opposite meaning. The options are:
   can be used to update only the subkeys or other non-user id related
   information.
 
+  @item self-sigs-only
+  Accept only self-signatures while importing a key.  All other
+  key-signatures are skipped at an early import stage.  This option
+  can be used with @code{keyserver-options} to mitigate attempts to
+  flood a key with bogus signatures from a keyserver.  The drawback is
+  that all other valid key-signatures, as required by the Web of Trust
+  are also not imported.
+
   @item repair-keys
   After import, fix various problems with the
   keys.  For example, this reorders signatures, and strips duplicate
@@ -2636,11 +2670,11 @@ legacy non-MDC message is exceptionally required, the option
 
 @item --disable-signer-uid
 @opindex disable-signer-uid
-By default the user ID of the signing key is embedded in the data
-signature.  As of now this is only done if the signing key has been
-specified with @option{local-user} using a mail address.  This
-information can be helpful for verifier to locate the key; see
-option @option{--auto-key-retrieve}.
+By default the user ID of the signing key is embedded in the data signature.
+As of now this is only done if the signing key has been specified with
+@option{local-user} using a mail address, or with @option{sender}.  This
+information can be helpful for verifier to locate the key; see option
+@option{--auto-key-retrieve}.
 
 @item --personal-cipher-preferences @var{string}
 @opindex personal-cipher-preferences
